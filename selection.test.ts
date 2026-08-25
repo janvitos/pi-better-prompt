@@ -1,0 +1,302 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { EditorComponent } from "@earendil-works/pi-tui";
+import {
+	comparePositions,
+	extractRange,
+	installPromptSelection,
+	normalizeRange,
+	type EditorConstructor,
+	type SelectionDependencies,
+} from "./selection.ts";
+
+const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+class FakeEditor implements EditorComponent {
+	state = { lines: [""], cursorLine: 0, cursorCol: 0 };
+	lastWidth = 80;
+	scrollOffset = 0;
+	paddingX = 0;
+	lastAction: unknown = null;
+	preferredVisualCol: unknown = null;
+	snappedFromCursorCol: unknown = null;
+	pastes = new Map<number, string>();
+	historyIndex = -1;
+	historyDraft: unknown = null;
+	undoStack: Array<{ lines: string[]; cursorLine: number; cursorCol: number; pastes: Map<number, string> }> = [];
+	changes: string[] = [];
+	submissions: string[] = [];
+	renders = 0;
+	autocompleteCancelled = 0;
+	tui = { requestRender: () => { this.renders++; } };
+	onSubmit = (text: string) => { this.submissions.push(text); };
+	onChange = (text: string) => { this.changes.push(text); };
+
+	getText(): string { return this.state.lines.join("\n"); }
+	setText(text: string): void {
+		this.state.lines = text.split("\n");
+		this.state.cursorLine = this.state.lines.length - 1;
+		this.state.cursorCol = this.state.lines.at(-1)?.length ?? 0;
+	}
+	insertTextAtCursor(text: string): void {
+		if (!text) return;
+		this.pushUndoSnapshot();
+		this.insert(text);
+	}
+	handleInput(data: string): void {
+		if (data === "left") return this.moveCursor(0, -1);
+		if (data === "right") return this.moveCursor(0, 1);
+		if (data === "backspace") {
+			if (this.state.cursorCol === 0) return;
+			this.pushUndoSnapshot();
+			const line = this.state.lines[this.state.cursorLine] ?? "";
+			this.state.lines[this.state.cursorLine] = line.slice(0, this.state.cursorCol - 1) + line.slice(this.state.cursorCol);
+			this.state.cursorCol--;
+			this.onChange?.(this.getText());
+			return;
+		}
+		if (data === "delete") {
+			const line = this.state.lines[this.state.cursorLine] ?? "";
+			if (this.state.cursorCol >= line.length) return;
+			this.pushUndoSnapshot();
+			this.state.lines[this.state.cursorLine] = line.slice(0, this.state.cursorCol) + line.slice(this.state.cursorCol + 1);
+			this.onChange?.(this.getText());
+			return;
+		}
+		if (data === "newline") {
+			this.pushUndoSnapshot();
+			return this.insert("\n");
+		}
+		if (data === "submit") {
+			const text = this.getText();
+			this.state = { lines: [""], cursorLine: 0, cursorCol: 0 };
+			this.onChange?.("");
+			this.onSubmit?.(text);
+			return;
+		}
+		if (data === "yank") {
+			this.pushUndoSnapshot();
+			return this.insert("YANK");
+		}
+		if (data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~")) {
+			this.pushUndoSnapshot();
+			return this.insert(data.slice(6, -6));
+		}
+		if (data.length === 1 && data.charCodeAt(0) >= 32) {
+			this.pushUndoSnapshot();
+			this.insert(data);
+		}
+	}
+	render(width: number): string[] {
+		this.lastWidth = width;
+		return ["─".repeat(width), ...this.state.lines, "─".repeat(width)];
+	}
+	invalidate(): void {}
+	moveCursor(deltaLine: number, deltaCol: number): void {
+		if (deltaLine) this.state.cursorLine = Math.max(0, Math.min(this.state.lines.length - 1, this.state.cursorLine + deltaLine));
+		const line = this.state.lines[this.state.cursorLine] ?? "";
+		if (deltaCol < 0 && this.state.cursorCol > 0) {
+			const parts = [...segmenter.segment(line.slice(0, this.state.cursorCol))];
+			this.state.cursorCol -= parts.at(-1)?.segment.length ?? 1;
+		} else if (deltaCol > 0 && this.state.cursorCol < line.length) {
+			this.state.cursorCol += [...segmenter.segment(line.slice(this.state.cursorCol))][0]?.segment.length ?? 1;
+		}
+		this.state.cursorCol = Math.min(this.state.cursorCol, line.length);
+	}
+	moveToLineStart(): void { this.state.cursorCol = 0; }
+	moveToLineEnd(): void { this.state.cursorCol = (this.state.lines[this.state.cursorLine] ?? "").length; }
+	buildVisualLineMap(): Array<{ logicalLine: number; startCol: number; length: number }> {
+		return this.state.lines.map((line, logicalLine) => ({ logicalLine, startCol: 0, length: line.length }));
+	}
+	pushUndoSnapshot(): void {
+		this.undoStack.push({
+			lines: [...this.state.lines],
+			cursorLine: this.state.cursorLine,
+			cursorCol: this.state.cursorCol,
+			pastes: new Map(this.pastes),
+		});
+	}
+	undo(): void {
+		const value = this.undoStack.pop();
+		if (!value) return;
+		this.state = { lines: value.lines, cursorLine: value.cursorLine, cursorCol: value.cursorCol };
+		this.pastes = value.pastes;
+	}
+	cancelAutocomplete(): void { this.autocompleteCancelled++; }
+	exitHistoryBrowsing(): void { this.historyIndex = -1; this.historyDraft = null; }
+	expandPasteMarkers(text: string): string {
+		return text.replace(/\[paste #(\d+)( (\+\d+ lines|\d+ chars))?\]/g, (match, id) => this.pastes.get(Number(id)) ?? match);
+	}
+
+	private insert(text: string): void {
+		const line = this.state.lines[this.state.cursorLine] ?? "";
+		const before = line.slice(0, this.state.cursorCol);
+		const after = line.slice(this.state.cursorCol);
+		const inserted = text.split("\n");
+		if (inserted.length === 1) {
+			this.state.lines[this.state.cursorLine] = before + text + after;
+			this.state.cursorCol += text.length;
+		} else {
+			this.state.lines.splice(this.state.cursorLine, 1, before + inserted[0], ...inserted.slice(1, -1), inserted.at(-1)! + after);
+			this.state.cursorLine += inserted.length - 1;
+			this.state.cursorCol = inserted.at(-1)!.length;
+		}
+		this.onChange?.(this.getText());
+	}
+}
+
+const ACTIONS: Record<string, string> = {
+	copy: "tui.input.copy",
+	left: "tui.editor.cursorLeft",
+	right: "tui.editor.cursorRight",
+	up: "tui.editor.cursorUp",
+	down: "tui.editor.cursorDown",
+	backspace: "tui.editor.deleteCharBackward",
+	delete: "tui.editor.deleteCharForward",
+	newline: "tui.input.newLine",
+	submit: "tui.input.submit",
+	yank: "tui.editor.yank",
+};
+
+function dependencies(copied: string[], copyError?: unknown): SelectionDependencies {
+	return {
+		baseEditor: FakeEditor as unknown as EditorConstructor,
+		matchesKey: (data, key) => data === key,
+		matchesAction: (data, action) => ACTIONS[data] === action,
+		decodePrintable: (data) => data.length === 1 && data.charCodeAt(0) >= 32 ? data : undefined,
+		visibleWidth: (text) => text.replace(/\x1b\[[0-9;]*m/g, "").length,
+		sliceByColumn: (text, start, width) => text.slice(start, start + width),
+		copyText: async (text) => { if (copyError) throw copyError; copied.push(text); },
+		onCopyError: () => undefined,
+	};
+}
+
+test("normalizes and extracts forward, backward, multiline, and Unicode ranges", () => {
+	assert.equal(comparePositions({ line: 0, col: 2 }, { line: 1, col: 0 }) < 0, true);
+	assert.deepEqual(
+		normalizeRange({ line: 1, col: 2 }, { line: 0, col: 1 }),
+		{ start: { line: 0, col: 1 }, end: { line: 1, col: 2 } },
+	);
+	assert.equal(extractRange(["a😀b", "second"], { start: { line: 0, col: 1 }, end: { line: 1, col: 3 } }), "😀b\nsec");
+});
+
+test("Shift+Arrow selects graphemes, Ctrl+C copies, typing replaces, and undo is atomic", async () => {
+	const copied: string[] = [];
+	const editor = new FakeEditor();
+	editor.setText("hello😀");
+	const installed = installPromptSelection(editor, dependencies(copied));
+	assert.equal(installed.supported, true);
+
+	editor.handleInput("shift+left");
+	editor.handleInput("shift+left");
+	editor.handleInput("copy");
+	await Promise.resolve();
+	assert.deepEqual(copied, ["o😀"]);
+
+	editor.handleInput("X");
+	assert.equal(editor.getText(), "hellX");
+	assert.equal(editor.undoStack.length, 1);
+	editor.undo();
+	assert.equal(editor.getText(), "hello😀");
+});
+
+test("selection deletion, directional collapse, Escape, newline, and submit follow editor conventions", () => {
+	const editor = new FakeEditor();
+	editor.setText("alpha");
+	installPromptSelection(editor, dependencies([]));
+
+	editor.handleInput("shift+home");
+	editor.handleInput("right");
+	assert.deepEqual(editor.state, { lines: ["alpha"], cursorLine: 0, cursorCol: 5 });
+	editor.handleInput("shift+home");
+	editor.handleInput("escape");
+	editor.setText("alpha");
+	editor.handleInput("backspace");
+	assert.equal(editor.getText(), "alph");
+
+	editor.setText("alpha");
+	editor.handleInput("shift+home");
+	editor.handleInput("newline");
+	assert.equal(editor.getText(), "\n");
+	editor.undo();
+	assert.equal(editor.getText(), "alpha");
+
+	editor.handleInput("shift+home");
+	editor.handleInput("submit");
+	assert.deepEqual(editor.submissions, ["alpha"]);
+});
+
+test("copy expands selected paste markers and replacement retains untouched markers", async () => {
+	const copied: string[] = [];
+	const editor = new FakeEditor();
+	const first = "[paste #1 12 chars]";
+	const second = "[paste #2 11 chars]";
+	editor.setText(`${first} ${second}`);
+	editor.pastes.set(1, "expanded one");
+	editor.pastes.set(2, "expanded two");
+	editor.state.cursorCol = first.length;
+	installPromptSelection(editor, dependencies(copied));
+
+	editor.handleInput("shift+home");
+	editor.handleInput("copy");
+	await Promise.resolve();
+	assert.deepEqual(copied, ["expanded one"]);
+	editor.handleInput("X");
+	assert.equal(editor.getText(), `X ${second}`);
+	assert.equal(editor.pastes.has(1), false);
+	assert.equal(editor.pastes.get(2), "expanded two");
+});
+
+test("programmatic insertion replaces a selection atomically and setText clears it", async () => {
+	const copied: string[] = [];
+	const editor = new FakeEditor();
+	editor.setText("alpha");
+	installPromptSelection(editor, dependencies(copied));
+	editor.handleInput("shift+home");
+	editor.insertTextAtCursor?.("paste");
+	assert.equal(editor.getText(), "paste");
+	assert.equal(editor.undoStack.length, 1);
+	editor.undo();
+	assert.equal(editor.getText(), "alpha");
+
+	editor.handleInput("shift+home");
+	editor.setText("replacement");
+	editor.handleInput("copy");
+	await Promise.resolve();
+	assert.deepEqual(copied, []);
+});
+
+test("render hook highlights registered editors and is reference-counted on dispose", () => {
+	const first = new FakeEditor();
+	const second = new FakeEditor();
+	first.setText("first");
+	second.setText("second");
+	const firstInstalled = installPromptSelection(first, dependencies([]));
+	const secondInstalled = installPromptSelection(second, dependencies([]));
+	first.handleInput("shift+home");
+	second.handleInput("shift+home");
+	assert.match(first.render(10)[1]!, /\x1b\[7mfirst\x1b\[27m/);
+	assert.match(second.render(10)[1]!, /\x1b\[7msecond\x1b\[27m/);
+
+	firstInstalled.dispose();
+	assert.equal(first.render(10)[1], "first");
+	assert.match(second.render(10)[1]!, /\x1b\[7msecond\x1b\[27m/);
+	secondInstalled.dispose();
+	secondInstalled.dispose();
+	assert.equal(second.render(10)[1], "second");
+});
+
+test("unsupported editors degrade without patching input", () => {
+	let handled = 0;
+	const editor: EditorComponent = {
+		getText: () => "",
+		setText: () => undefined,
+		handleInput: () => { handled++; },
+		render: () => [],
+		invalidate: () => undefined,
+	};
+	const installed = installPromptSelection(editor, dependencies([]));
+	assert.equal(installed.supported, false);
+	editor.handleInput("shift+left");
+	assert.equal(handled, 1);
+});

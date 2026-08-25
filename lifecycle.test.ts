@@ -35,6 +35,15 @@ test("falls back to a default editor when no extension selected one", () => {
 	assert.deepEqual(installHistory(undefined)().features, ["default", "global-history"]);
 });
 
+test("passes factory arguments to decorators", () => {
+	const decorated = decorateCurrentFactory(
+		(value: string) => value.toUpperCase(),
+		(value: string) => value,
+		(value, original) => `${value}:${original}`,
+	);
+	assert.equal(decorated("prompt"), "PROMPT:prompt");
+});
+
 test("a later editor replacement remains the documented residual limitation", () => {
 	let selected = installHistory(planBuild());
 	selected = () => ({ features: ["late-replacement"] });

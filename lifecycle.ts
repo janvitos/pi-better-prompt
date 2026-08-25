@@ -4,8 +4,8 @@ export type Factory<Args extends unknown[], Value> = (...args: Args) => Value;
 export function decorateCurrentFactory<Args extends unknown[], Value>(
 	current: Factory<Args, Value> | undefined,
 	fallback: Factory<Args, Value>,
-	decorate: (value: Value) => Value,
+	decorate: (value: Value, ...args: Args) => Value,
 ): Factory<Args, Value> {
 	const base = current ?? fallback;
-	return (...args: Args) => decorate(base(...args));
+	return (...args: Args) => decorate(base(...args), ...args);
 }

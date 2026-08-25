@@ -1,7 +1,7 @@
 {
   "name": "@janvitos/pi-prompt-history",
-  "version": "0.1.0",
-  "description": "Global prompt history across Pi sessions and projects.",
+  "version": "0.2.0",
+  "description": "Global prompt history and keyboard text selection for Pi's prompt editor.",
   "type": "module",
   "license": "MIT",
   "author": "janvitos",
@@ -13,6 +13,7 @@
     "pi-package",
     "pi-coding-agent",
     "prompt-history",
+    "text-selection",
     "developer-tools"
   ],
   "engines": {
@@ -22,6 +23,7 @@
     "index.ts",
     "history.ts",
     "editor.ts",
+    "selection.ts",
     "lifecycle.ts"
   ],
   "publishConfig": {
@@ -32,8 +34,8 @@
     "prepublishOnly": "npm test"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.84.1",
-    "@earendil-works/pi-tui": "*"
+    "@earendil-works/pi-coding-agent": ">=0.84.2",
+    "@earendil-works/pi-tui": ">=0.84.2"
   },
   "pi": {
     "extensions": [

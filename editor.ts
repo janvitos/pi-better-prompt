@@ -1,4 +1,9 @@
 import type { EditorComponent } from "@earendil-works/pi-tui";
+import {
+	installPromptSelection,
+	type SelectionDependencies,
+	type PromptSelection,
+} from "./selection.ts";
 
 export interface GlobalHistoryEditor {
 	editor: EditorComponent;
@@ -14,7 +19,14 @@ export interface GlobalHistoryEditor {
  * reflectively before seeding. Editors with a different implementation still
  * receive global entries, but their pre-existing private history cannot be removed.
  */
-export function installGlobalHistory(editor: EditorComponent, prompts: readonly string[]): GlobalHistoryEditor {
+export function installGlobalHistory(
+	editor: EditorComponent,
+	prompts: readonly string[],
+	selectionDependencies?: SelectionDependencies,
+): GlobalHistoryEditor {
+	const selection: PromptSelection | undefined = selectionDependencies
+		? installPromptSelection(editor, selectionDependencies)
+		: undefined;
 	const addToHistory = editor.addToHistory?.bind(editor);
 	const candidate = editor as EditorComponent & { history?: unknown };
 	if (Array.isArray(candidate.history)) candidate.history.length = 0;
@@ -35,6 +47,7 @@ export function installGlobalHistory(editor: EditorComponent, prompts: readonly 
 		dispose() {
 			if (!active) return;
 			active = false;
+			selection?.dispose();
 			if (addToHistory) editor.addToHistory = addToHistory;
 		},
 	};

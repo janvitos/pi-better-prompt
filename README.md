@@ -1,8 +1,8 @@
-# Pi Global Prompt History
+# Pi Global Prompt History & Selection
 
-OpenCode-style global prompt history for the [Pi coding agent](https://github.com/earendil-works/pi).
+OpenCode-style global prompt history and familiar keyboard text selection for the [Pi coding agent](https://github.com/earendil-works/pi).
 
-Pi normally reconstructs Up/Down history from the active session. This extension instead keeps one text history shared across sessions and projects, so `/new` no longer leaves prompt navigation empty.
+Pi normally reconstructs Up/Down history from the active session. This extension instead keeps one text history shared across sessions and projects, so `/new` no longer leaves prompt navigation empty. It also adds Shift+Arrow selection to Pi's main prompt editor.
 
 ## Policy
 
@@ -16,9 +16,27 @@ Pi normally reconstructs Up/Down history from the active session. This extension
 - Skips malformed JSONL records and rewrites valid retained records on load.
 - Uses a lock and atomic replacement to avoid lost updates between simultaneous Pi processes.
 
+## Prompt text selection
+
+| Action | Behavior |
+| --- | --- |
+| `Shift+Left/Right` | Extend the selection by one grapheme |
+| `Shift+Up/Down` | Extend across visual lines, including wrapped text |
+| `Shift+Home/End` | Extend to the logical line start/end |
+| `Left/Up` | Collapse to the start of the selection |
+| `Right/Down` | Collapse to the end of the selection |
+| `Escape` | Clear the selection without interrupting Pi |
+| `Ctrl+C` | Copy the selected prompt text |
+
+Typing, pasting, inserting a newline, yanking, Backspace/Delete, and Pi's word/line deletion commands replace or remove the active range as expected. The replacement is a single undo unit. Bare Enter retains Pi's normal submit behavior and does not delete the selected text.
+
+Selection is grapheme-aware and supports Unicode, multiline prompts, and visual wrapping. Large collapsed-paste markers remain atomic; copying one copies its expanded contents.
+
+Terminal support for modified navigation sequences varies. Modern terminals with the Kitty keyboard protocol work best; Pi also recognizes common legacy Shift+Arrow sequences.
+
 ## Requirements
 
-- Pi 0.84.1 or newer
+- Pi 0.84.2 or newer
 - Node.js 22.6 or newer
 - TUI mode
 
@@ -69,9 +87,11 @@ pi -e /path/to/pi-plan-build/index.ts -e /path/to/pi-prompt-history/index.ts
 pi -e /path/to/pi-prompt-history/index.ts -e /path/to/pi-plan-build/index.ts
 ```
 
-The history decorator preserves `pi-plan-build`'s mode badge and Tab behavior while replacing session-derived history with global history. It can fully clear pre-seeded history from Pi's built-in `Editor` and `CustomEditor`. A third-party editor with a different private history implementation can receive global entries, but Pi currently exposes no public API with which to clear that editor's pre-existing entries.
+The decorator preserves `pi-plan-build`'s mode badge and Tab behavior while adding selection and replacing session-derived history with global history. Selection is enabled for Pi's built-in `Editor`, `CustomEditor`, and subclasses that retain Pi's editor runtime shape. A non-standard third-party editor safely falls back to history-only behavior.
 
-**Residual limitation:** Pi's editor API is last-writer-wins rather than true middleware. An unusual extension that replaces the editor during or after `resources_discover`—instead of the documented `session_start` pattern—can still overwrite the history-enabled editor. Pi provides no notification with which to reapply the decorator. Deferring also recreates the selected editor once during startup/reload; Pi preserves its text, but private transient state such as cursor position or undo state may reset.
+The extension can fully clear pre-seeded history from Pi's built-in editors. A third-party editor with a different private history implementation can receive global entries, but Pi currently exposes no public API with which to clear that editor's pre-existing entries.
+
+**Residual limitation:** Pi's editor API is last-writer-wins rather than true middleware. An unusual extension that replaces the editor during or after `resources_discover`—instead of the documented `session_start` pattern—can still overwrite the decorated editor. Pi provides no notification with which to reapply the decorator. Deferring also recreates the selected editor once during startup/reload; Pi preserves its text, but private transient state such as cursor position or undo state may reset.
 
 ## Differences from OpenCode
 
@@ -100,7 +120,7 @@ npm test
 npm pack --dry-run
 ```
 
-Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, and custom editor preservation.
+Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, custom editor preservation, selection ranges, Unicode, editing/undo, paste markers, copying, rendering, and cleanup.
 
 ## License
 

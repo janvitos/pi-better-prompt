@@ -1,11 +1,20 @@
 import path from "node:path";
 import {
+	copyToClipboard,
 	CustomEditor,
 	getAgentDir,
 	type ExtensionAPI,
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { EditorComponent } from "@earendil-works/pi-tui";
+import {
+	decodeKittyPrintable,
+	Editor,
+	matchesKey,
+	sliceByColumn,
+	visibleWidth,
+	type EditorComponent,
+	type KeyId,
+} from "@earendil-works/pi-tui";
 import { installGlobalHistory, type GlobalHistoryEditor } from "./editor.ts";
 import { HistoryStore } from "./history.ts";
 import { decorateCurrentFactory } from "./lifecycle.ts";
@@ -49,13 +58,33 @@ export default function globalPromptHistory(pi: ExtensionAPI): void {
 		if (ctx.mode !== "tui") return;
 
 		const previous = ctx.ui.getEditorComponent();
-		const fallback = (tui, theme, keybindings) => new CustomEditor(tui, theme, keybindings);
+		const fallback: NonNullable<ReturnType<typeof ctx.ui.getEditorComponent>> =
+			(tui, theme, keybindings) => new CustomEditor(tui, theme, keybindings);
 		ctx.ui.setEditorComponent(decorateCurrentFactory(
 			previous,
 			fallback,
-			(editor): EditorComponent => {
+			(editor, _tui, _theme, keybindings): EditorComponent => {
 				activeEditor?.dispose();
-				activeEditor = installGlobalHistory(editor, prompts);
+				activeEditor = installGlobalHistory(editor, prompts, {
+					baseEditor: Editor,
+					matchesKey: (data, key) => matchesKey(data, key as KeyId),
+					matchesAction: (data, action) =>
+						keybindings.matches(data, action as Parameters<typeof keybindings.matches>[1]),
+					decodePrintable: (data) => {
+						const kitty = decodeKittyPrintable(data);
+						if (kitty !== undefined) return kitty;
+						return data.length > 0 && !data.startsWith("\x1b") && data.charCodeAt(0) >= 32
+							? data
+							: undefined;
+					},
+					visibleWidth,
+					sliceByColumn,
+					copyText: copyToClipboard,
+					onCopyError: (error) => {
+						const message = error instanceof Error ? error.message : String(error);
+						ctx.ui.notify(`Could not copy prompt selection: ${message}`, "warning");
+					},
+				});
 				return activeEditor.editor;
 			},
 		));
