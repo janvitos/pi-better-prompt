@@ -14,7 +14,7 @@ import {
 const entry = (input: string) => JSON.stringify({ version: 1, input });
 
 async function temporaryStore(options: ConstructorParameters<typeof HistoryStore>[1] = {}) {
-	const directory = await mkdtemp(path.join(os.tmpdir(), "pi-prompt-history-"));
+	const directory = await mkdtemp(path.join(os.tmpdir(), "pi-better-prompt-"));
 	return {
 		directory,
 		file: path.join(directory, "prompt-history.jsonl"),

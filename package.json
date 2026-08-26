@@ -1,19 +1,20 @@
 {
-  "name": "@janvitos/pi-prompt-history",
-  "version": "0.3.0",
-  "description": "Global prompt history and familiar keyboard editing for Pi's prompt editor.",
+  "name": "@janvitos/pi-better-prompt",
+  "version": "0.4.0",
+  "description": "Global prompt history, familiar keyboard editing, and simple activity statuses for Pi.",
   "type": "module",
   "license": "MIT",
   "author": "janvitos",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/janvitos/pi-prompt-history.git"
+    "url": "git+https://github.com/janvitos/pi-better-prompt.git"
   },
   "keywords": [
     "pi-package",
     "pi-coding-agent",
     "prompt-history",
     "prompt-editor",
+    "activity-status",
     "text-selection",
     "developer-tools"
   ],
@@ -25,6 +26,7 @@
     "history.ts",
     "editor.ts",
     "selection.ts",
+    "activity.ts",
     "lifecycle.ts"
   ],
   "publishConfig": {

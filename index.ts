@@ -15,13 +15,15 @@ import {
 	type EditorComponent,
 	type KeyId,
 } from "@earendil-works/pi-tui";
+import { installActivityStatus } from "./activity.ts";
 import { installGlobalHistory, type GlobalHistoryEditor } from "./editor.ts";
 import { HistoryStore } from "./history.ts";
 import { decorateCurrentFactory } from "./lifecycle.ts";
 
 export const GLOBAL_HISTORY_PATH = path.join(getAgentDir(), "prompt-history.jsonl");
 
-export default function globalPromptHistory(pi: ExtensionAPI): void {
+export default function betterPrompt(pi: ExtensionAPI): void {
+	installActivityStatus(pi);
 	const store = new HistoryStore(GLOBAL_HISTORY_PATH);
 	let activeEditor: GlobalHistoryEditor | undefined;
 	let currentContext: ExtensionContext | undefined;

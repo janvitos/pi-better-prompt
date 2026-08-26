@@ -1,8 +1,8 @@
-# Pi Global Prompt History & Editing
+# Pi Better Prompt
 
-OpenCode-style global prompt history and familiar keyboard text editing for the [Pi coding agent](https://github.com/earendil-works/pi).
+OpenCode-style global prompt history, familiar keyboard text editing, and simple activity statuses for the [Pi coding agent](https://github.com/earendil-works/pi).
 
-Pi normally reconstructs Up/Down history from the active session. This extension instead keeps one text history shared across sessions and projects, so `/new` no longer leaves prompt navigation empty. It also adds selection, clipboard, undo, and redo shortcuts to Pi's main prompt editor.
+Pi normally reconstructs Up/Down history from the active session. This extension instead keeps one text history shared across sessions and projects, so `/new` no longer leaves prompt navigation empty. It also adds selection, clipboard, undo, and redo shortcuts to Pi's main prompt editor and replaces the generic working message with the agent's current activity.
 
 ## Policy
 
@@ -38,6 +38,20 @@ Selection is grapheme-aware and supports Unicode, multiline prompts, and visual 
 
 Terminal support for modified navigation sequences varies. Modern terminals with the Kitty keyboard protocol work best; Pi also recognizes common legacy Shift+Arrow sequences.
 
+## Activity status
+
+While the agent is active, Pi's working row uses a compact one-word status:
+
+- `Thinking...` while waiting for or processing model output
+- `Searching...` while searching the web or project
+- `Reading...` while reading files or web sources
+- `Writing...` while writing or editing files
+- `Running...` while executing shell commands
+- `Responding...` while streaming response text
+- `Working...` for unknown tools or mixed parallel operations
+
+The status contains no filenames, queries, commands, or tool counts. Pi hides the working row normally when the agent becomes idle. Activity statuses are TUI-only.
+
 ## Requirements
 
 - Pi 0.84.2 or newer
@@ -47,16 +61,27 @@ Terminal support for modified navigation sequences varies. Modern terminals with
 ## Install
 
 ```bash
-pi install npm:@janvitos/pi-prompt-history
+pi install npm:@janvitos/pi-better-prompt
 ```
 
 For local development:
 
 ```bash
-pi -e /path/to/pi-prompt-history/index.ts
+pi -e /path/to/pi-better-prompt/index.ts
 ```
 
 Restart Pi after installation, or run `/reload` in an existing session.
+
+### Migrating from pi-prompt-history
+
+Remove the old package before installing the renamed one:
+
+```bash
+pi remove npm:@janvitos/pi-prompt-history
+pi install npm:@janvitos/pi-better-prompt
+```
+
+The existing `prompt-history.jsonl` storage path is intentionally unchanged, so saved prompt history carries over automatically.
 
 ## Storage
 
@@ -87,8 +112,8 @@ The extension loads history during `session_start`, then waits until Pi's subseq
 Both orders therefore work:
 
 ```bash
-pi -e /path/to/pi-plan-build/index.ts -e /path/to/pi-prompt-history/index.ts
-pi -e /path/to/pi-prompt-history/index.ts -e /path/to/pi-plan-build/index.ts
+pi -e /path/to/pi-plan-build/index.ts -e /path/to/pi-better-prompt/index.ts
+pi -e /path/to/pi-better-prompt/index.ts -e /path/to/pi-plan-build/index.ts
 ```
 
 The decorator preserves `pi-plan-build`'s mode badge and Tab behavior while adding selection and replacing session-derived history with global history. Selection is enabled for Pi's built-in `Editor`, `CustomEditor`, and subclasses that retain Pi's editor runtime shape. A non-standard third-party editor safely falls back to history-only behavior.
@@ -124,7 +149,7 @@ npm test
 npm pack --dry-run
 ```
 
-Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, custom editor preservation, selection ranges, Unicode, cut/copy safety, undo/redo, paste markers, rendering, and cleanup.
+Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, custom editor preservation, activity transitions and parallel tools, selection ranges, Unicode, cut/copy safety, undo/redo, paste markers, rendering, and cleanup.
 
 ## License
 
