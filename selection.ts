@@ -69,6 +69,7 @@ export interface SelectionDependencies {
 
 export interface PromptSelection {
 	supported: boolean;
+	clear(): void;
 	dispose(): void;
 }
 
@@ -290,7 +291,7 @@ function restoreProperty(target: object, name: PropertyKey, descriptor: Property
 }
 
 export function installPromptSelection(editor: EditorComponent, deps: SelectionDependencies): PromptSelection {
-	if (!isSelectableEditor(editor, deps)) return { supported: false, dispose() {} };
+	if (!isSelectableEditor(editor, deps)) return { supported: false, clear() {}, dispose() {} };
 
 	let active = true;
 	let suppressSnapshots = 0;
@@ -511,6 +512,7 @@ export function installPromptSelection(editor: EditorComponent, deps: SelectionD
 
 	return {
 		supported: true,
+		clear,
 		dispose() {
 			if (!active) return;
 			active = false;

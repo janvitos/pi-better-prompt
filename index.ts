@@ -7,6 +7,7 @@ import {
 	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import {
+	CURSOR_MARKER,
 	decodeKittyPrintable,
 	Editor,
 	matchesKey,
@@ -19,6 +20,7 @@ import { installActivityStatus } from "./activity.ts";
 import { installGlobalHistory, type GlobalHistoryEditor } from "./editor.ts";
 import { HistoryStore } from "./history.ts";
 import { decorateCurrentFactory } from "./lifecycle.ts";
+import { installPromptMouse, setActiveMouseEditor, type PromptMouseInstallation } from "./mouse.ts";
 
 export const GLOBAL_HISTORY_PATH = path.join(getAgentDir(), "prompt-history.jsonl");
 
@@ -26,6 +28,7 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 	installActivityStatus(pi);
 	const store = new HistoryStore(GLOBAL_HISTORY_PATH);
 	let activeEditor: GlobalHistoryEditor | undefined;
+	let mouseInstallation: PromptMouseInstallation | undefined;
 	let currentContext: ExtensionContext | undefined;
 	let prompts: string[] = [];
 
@@ -43,6 +46,9 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		currentContext = ctx;
 		prompts = [];
+		setActiveMouseEditor(undefined);
+		mouseInstallation?.dispose();
+		mouseInstallation = undefined;
 		if (ctx.mode !== "tui") return;
 
 		try {
@@ -65,9 +71,9 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 		ctx.ui.setEditorComponent(decorateCurrentFactory(
 			previous,
 			fallback,
-			(editor, _tui, _theme, keybindings): EditorComponent => {
+			(editor, tui, _theme, keybindings): EditorComponent => {
 				activeEditor?.dispose();
-				activeEditor = installGlobalHistory(editor, prompts, {
+				const installed = installGlobalHistory(editor, prompts, {
 					baseEditor: Editor,
 					matchesKey: (data, key) => matchesKey(data, key as KeyId),
 					matchesAction: (data, action) =>
@@ -87,7 +93,14 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 						ctx.ui.notify(`Could not copy prompt selection: ${message}`, "warning");
 					},
 				});
-				return activeEditor.editor;
+				activeEditor = installed;
+				setActiveMouseEditor({
+					component: installed.editor,
+					clearSelection: () => installed.clearSelection(),
+				});
+				mouseInstallation?.dispose();
+				mouseInstallation = installPromptMouse(tui, { cursorMarker: CURSOR_MARKER, visibleWidth });
+				return installed.editor;
 			},
 		));
 	});
@@ -103,6 +116,9 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", () => {
+		setActiveMouseEditor(undefined);
+		mouseInstallation?.dispose();
+		mouseInstallation = undefined;
 		activeEditor?.dispose();
 		activeEditor = undefined;
 		currentContext = undefined;

@@ -31,12 +31,15 @@ Pi normally reconstructs Up/Down history from the active session. This extension
 | `Ctrl+X` | Cut the selected prompt text |
 | `Ctrl+Z` | Undo a prompt edit; do nothing when no undo is available |
 | `Ctrl+Shift+Z` | Redo an undone prompt edit |
+| Primary click | Move the caret within prompt text in fullscreen mode |
 
 Typing, pasting, inserting a newline, yanking, Backspace/Delete, and Pi's word/line deletion commands replace or remove the active range as expected. Replacement and cut are each a single undo unit. A new edit after undo clears redo history. Bare Enter retains Pi's normal submit behavior and does not delete selected text. `Ctrl+X` without a selection retains Pi's assistant-message copy action. While this extension is active, `Ctrl+Z` is reserved for prompt undo and never triggers Pi's suspend action.
 
 Selection is grapheme-aware and supports Unicode, multiline prompts, and visual wrapping. Large collapsed-paste markers remain atomic; copying one copies its expanded contents.
 
 Terminal support for modified navigation sequences varies. Modern terminals with the Kitty keyboard protocol work best; Pi also recognizes common legacy Shift+Arrow sequences.
+
+Click-to-caret works only in Pi's fullscreen TUI. It supports Pi's active built-in or custom editor, including wrapped, scrolled, padded, multiline, and Unicode prompt text. Other clicks retain Pi's transcript selection, hyperlink, and scrollbar behavior. Because Pi does not expose component mouse events to extensions, this feature uses guarded fullscreen renderer internals adapted from [pi-starline](https://github.com/Andy8647/pi-starline); incompatible Pi versions safely leave it disabled.
 
 ## Activity status
 
@@ -149,7 +152,7 @@ npm test
 npm pack --dry-run
 ```
 
-Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, custom editor preservation, activity transitions and parallel tools, selection ranges, Unicode, cut/copy safety, undo/redo, paste markers, rendering, and cleanup.
+Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, custom editor preservation, activity transitions and parallel tools, selection ranges, fullscreen click positioning, Unicode, cut/copy safety, undo/redo, paste markers, rendering, and cleanup.
 
 ## License
 

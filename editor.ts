@@ -8,6 +8,7 @@ import {
 export interface GlobalHistoryEditor {
 	editor: EditorComponent;
 	addInteractive(input: string): void;
+	clearSelection(): void;
 	dispose(): void;
 }
 
@@ -43,6 +44,9 @@ export function installGlobalHistory(
 		editor,
 		addInteractive(input: string) {
 			if (active) addToHistory?.(input);
+		},
+		clearSelection() {
+			if (active) selection?.clear();
 		},
 		dispose() {
 			if (!active) return;
