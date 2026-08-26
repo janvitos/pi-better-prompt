@@ -1,8 +1,8 @@
-# Pi Global Prompt History & Selection
+# Pi Global Prompt History & Editing
 
-OpenCode-style global prompt history and familiar keyboard text selection for the [Pi coding agent](https://github.com/earendil-works/pi).
+OpenCode-style global prompt history and familiar keyboard text editing for the [Pi coding agent](https://github.com/earendil-works/pi).
 
-Pi normally reconstructs Up/Down history from the active session. This extension instead keeps one text history shared across sessions and projects, so `/new` no longer leaves prompt navigation empty. It also adds Shift+Arrow selection to Pi's main prompt editor.
+Pi normally reconstructs Up/Down history from the active session. This extension instead keeps one text history shared across sessions and projects, so `/new` no longer leaves prompt navigation empty. It also adds selection, clipboard, undo, and redo shortcuts to Pi's main prompt editor.
 
 ## Policy
 
@@ -16,7 +16,7 @@ Pi normally reconstructs Up/Down history from the active session. This extension
 - Skips malformed JSONL records and rewrites valid retained records on load.
 - Uses a lock and atomic replacement to avoid lost updates between simultaneous Pi processes.
 
-## Prompt text selection
+## Prompt editing
 
 | Action | Behavior |
 | --- | --- |
@@ -26,9 +26,13 @@ Pi normally reconstructs Up/Down history from the active session. This extension
 | `Left/Up` | Collapse to the start of the selection |
 | `Right/Down` | Collapse to the end of the selection |
 | `Escape` | Clear the selection without interrupting Pi |
+| `Ctrl+A` | Select the entire prompt |
 | `Ctrl+C` | Copy the selected prompt text |
+| `Ctrl+X` | Cut the selected prompt text |
+| `Ctrl+Z` | Undo a prompt edit; do nothing when no undo is available |
+| `Ctrl+Shift+Z` | Redo an undone prompt edit |
 
-Typing, pasting, inserting a newline, yanking, Backspace/Delete, and Pi's word/line deletion commands replace or remove the active range as expected. The replacement is a single undo unit. Bare Enter retains Pi's normal submit behavior and does not delete the selected text.
+Typing, pasting, inserting a newline, yanking, Backspace/Delete, and Pi's word/line deletion commands replace or remove the active range as expected. Replacement and cut are each a single undo unit. A new edit after undo clears redo history. Bare Enter retains Pi's normal submit behavior and does not delete selected text. `Ctrl+X` without a selection retains Pi's assistant-message copy action. While this extension is active, `Ctrl+Z` is reserved for prompt undo and never triggers Pi's suspend action.
 
 Selection is grapheme-aware and supports Unicode, multiline prompts, and visual wrapping. Large collapsed-paste markers remain atomic; copying one copies its expanded contents.
 
@@ -120,7 +124,7 @@ npm test
 npm pack --dry-run
 ```
 
-Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, custom editor preservation, selection ranges, Unicode, editing/undo, paste markers, copying, rendering, and cleanup.
+Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, custom editor preservation, selection ranges, Unicode, cut/copy safety, undo/redo, paste markers, rendering, and cleanup.
 
 ## License
 

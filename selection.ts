@@ -22,6 +22,12 @@ interface LayoutLine {
 	length: number;
 }
 
+interface EditorSnapshot {
+	state: EditorState;
+	pastes: Map<number, string>;
+	pasteCounter: number;
+}
+
 interface SelectableEditor extends EditorComponent {
 	state: EditorState;
 	lastWidth: number;
@@ -32,13 +38,16 @@ interface SelectableEditor extends EditorComponent {
 	snappedFromCursorCol: unknown;
 	historyIndex?: number;
 	historyDraft?: unknown;
-	pastes?: Map<number, string>;
+	pastes: Map<number, string>;
+	pasteCounter: number;
+	undoStack: { readonly length: number };
 	tui: { requestRender(): void };
 	moveCursor(deltaLine: number, deltaCol: number): void;
 	moveToLineStart(): void;
 	moveToLineEnd(): void;
 	buildVisualLineMap(width: number): LayoutLine[];
 	pushUndoSnapshot(): void;
+	undo(): void;
 	cancelAutocomplete(): void;
 	exitHistoryBrowsing(): void;
 	expandPasteMarkers(text: string): string;
@@ -124,6 +133,11 @@ function isSelectableEditor(editor: EditorComponent, deps: SelectionDependencies
 		typeof value.moveToLineEnd === "function" &&
 		typeof value.buildVisualLineMap === "function" &&
 		typeof value.pushUndoSnapshot === "function" &&
+		typeof value.undo === "function" &&
+		value.undoStack &&
+		typeof value.undoStack.length === "number" &&
+		value.pastes instanceof Map &&
+		typeof value.pasteCounter === "number" &&
 		typeof value.cancelAutocomplete === "function" &&
 		typeof value.exitHistoryBrowsing === "function" &&
 		typeof value.expandPasteMarkers === "function" &&
@@ -213,6 +227,37 @@ function registerRenderHook(
 	};
 }
 
+function captureSnapshot(editor: SelectableEditor): EditorSnapshot {
+	return structuredClone({
+		state: editor.state,
+		pastes: editor.pastes,
+		pasteCounter: editor.pasteCounter,
+	});
+}
+
+function restoreSnapshot(editor: SelectableEditor, snapshot: EditorSnapshot): void {
+	Object.assign(editor.state, snapshot.state);
+	editor.pastes = snapshot.pastes;
+	editor.pasteCounter = snapshot.pasteCounter;
+	editor.lastAction = null;
+	editor.preferredVisualCol = null;
+	editor.snappedFromCursorCol = null;
+	editor.cancelAutocomplete();
+	editor.exitHistoryBrowsing();
+	editor.onChange?.(editor.getText());
+	editor.tui.requestRender();
+}
+
+function sameRange(a: TextRange | undefined, b: TextRange): boolean {
+	return Boolean(
+		a &&
+		a.start.line === b.start.line &&
+		a.start.col === b.start.col &&
+		a.end.line === b.end.line &&
+		a.end.col === b.end.col,
+	);
+}
+
 function replaceRange(editor: SelectableEditor, range: TextRange, notify: boolean): void {
 	const startLine = editor.state.lines[range.start.line] ?? "";
 	const endLine = editor.state.lines[range.end.line] ?? "";
@@ -227,13 +272,11 @@ function replaceRange(editor: SelectableEditor, range: TextRange, notify: boolea
 	editor.snappedFromCursorCol = null;
 	editor.lastAction = null;
 
-	if (editor.pastes instanceof Map) {
-		const retained = new Set<number>();
-		for (const line of editor.state.lines) {
-			for (const match of line.matchAll(PASTE_MARKER)) retained.add(Number(match[1]));
-		}
-		for (const id of editor.pastes.keys()) if (!retained.has(id)) editor.pastes.delete(id);
+	const retained = new Set<number>();
+	for (const line of editor.state.lines) {
+		for (const match of line.matchAll(PASTE_MARKER)) retained.add(Number(match[1]));
 	}
+	for (const id of editor.pastes.keys()) if (!retained.has(id)) editor.pastes.delete(id);
 	if (notify) editor.onChange?.(editor.getText());
 }
 
@@ -251,16 +294,19 @@ export function installPromptSelection(editor: EditorComponent, deps: SelectionD
 
 	let active = true;
 	let suppressSnapshots = 0;
+	const redoStack: EditorSnapshot[] = [];
 	const registration: RenderRegistration = { deps };
 	const unregisterRender = registerRenderHook(editor, registration, deps);
 	const handleDescriptor = ownDescriptor(editor, "handleInput");
 	const setTextDescriptor = ownDescriptor(editor, "setText");
 	const insertDescriptor = ownDescriptor(editor, "insertTextAtCursor");
 	const snapshotDescriptor = ownDescriptor(editor, "pushUndoSnapshot");
+	const undoDescriptor = ownDescriptor(editor, "undo");
 	const originalHandleInput = editor.handleInput.bind(editor);
 	const originalSetText = editor.setText.bind(editor);
 	const originalInsert = editor.insertTextAtCursor?.bind(editor);
 	const originalPushSnapshot = editor.pushUndoSnapshot.bind(editor);
+	const originalUndo = editor.undo.bind(editor);
 
 	const clear = (): void => {
 		if (!registration.anchor) return;
@@ -270,6 +316,29 @@ export function installPromptSelection(editor: EditorComponent, deps: SelectionD
 	const range = (): TextRange | undefined => registration.anchor
 		? normalizeRange(registration.anchor, position(editor))
 		: undefined;
+	const pushEditSnapshot = (): void => {
+		redoStack.length = 0;
+		originalPushSnapshot();
+	};
+	const performUndo = (): boolean => {
+		if (editor.undoStack.length === 0) return false;
+		const before = captureSnapshot(editor);
+		const undoLength = editor.undoStack.length;
+		registration.anchor = undefined;
+		originalUndo();
+		if (editor.undoStack.length >= undoLength) return false;
+		redoStack.push(before);
+		editor.tui.requestRender();
+		return true;
+	};
+	const performRedo = (): boolean => {
+		const snapshot = redoStack.pop();
+		if (!snapshot) return false;
+		registration.anchor = undefined;
+		originalPushSnapshot();
+		restoreSnapshot(editor, snapshot);
+		return true;
+	};
 	const move = (data: string): boolean => {
 		let action: (() => void) | undefined;
 		if (deps.matchesKey(data, "shift+left")) action = () => editor.moveCursor(0, -1);
@@ -292,7 +361,7 @@ export function installPromptSelection(editor: EditorComponent, deps: SelectionD
 		if (!selected) return undefined;
 		editor.cancelAutocomplete();
 		editor.exitHistoryBrowsing();
-		originalPushSnapshot();
+		pushEditSnapshot();
 		replaceRange(editor, selected, notify);
 		registration.anchor = undefined;
 		return selected;
@@ -322,11 +391,33 @@ export function installPromptSelection(editor: EditorComponent, deps: SelectionD
 			suppressSnapshots--;
 			return;
 		}
-		originalPushSnapshot();
+		pushEditSnapshot();
+	};
+	editor.undo = () => {
+		performUndo();
 	};
 
 	editor.handleInput = (data: string): void => {
 		if (!active) return originalHandleInput(data);
+		if (deps.matchesKey(data, "ctrl+a")) {
+			editor.cancelAutocomplete();
+			registration.anchor = { line: 0, col: 0 };
+			editor.state.cursorLine = editor.state.lines.length - 1;
+			editor.state.cursorCol = editor.state.lines.at(-1)?.length ?? 0;
+			editor.preferredVisualCol = null;
+			editor.snappedFromCursorCol = null;
+			editor.lastAction = null;
+			editor.tui.requestRender();
+			return;
+		}
+		if (deps.matchesKey(data, "ctrl+shift+z")) {
+			if (!performRedo()) originalHandleInput(data);
+			return;
+		}
+		if (deps.matchesKey(data, "ctrl+z")) {
+			performUndo();
+			return;
+		}
 		if (move(data)) return;
 		const selected = range();
 		if (!selected) {
@@ -339,6 +430,20 @@ export function installPromptSelection(editor: EditorComponent, deps: SelectionD
 			return;
 		}
 
+		if (deps.matchesKey(data, "ctrl+x")) {
+			const capturedText = editor.getText();
+			const capturedRange = structuredClone(selected);
+			const displayed = extractRange(editor.state.lines, capturedRange);
+			const expanded = editor.expandPasteMarkers(displayed);
+			void deps.copyText(expanded)
+				.then(() => {
+					if (!active || editor.getText() !== capturedText || !sameRange(range(), capturedRange)) return;
+					deleteSelection(true);
+					editor.tui.requestRender();
+				})
+				.catch(deps.onCopyError);
+			return;
+		}
 		if (deps.matchesAction(data, "tui.input.copy")) {
 			const displayed = extractRange(editor.state.lines, selected);
 			const expanded = editor.expandPasteMarkers(displayed);
@@ -384,11 +489,13 @@ export function installPromptSelection(editor: EditorComponent, deps: SelectionD
 		// Submit and non-editing app actions keep their normal behavior, but must
 		// not leave a stale logical range if the editor changes underneath us.
 		clear();
+		if (deps.matchesAction(data, "tui.input.submit")) redoStack.length = 0;
 		originalHandleInput(data);
 	};
 
 	editor.setText = (text: string): void => {
 		registration.anchor = undefined;
+		redoStack.length = 0;
 		originalSetText(text);
 	};
 	if (originalInsert) {
@@ -412,6 +519,7 @@ export function installPromptSelection(editor: EditorComponent, deps: SelectionD
 			restoreProperty(editor, "setText", setTextDescriptor);
 			restoreProperty(editor, "insertTextAtCursor", insertDescriptor);
 			restoreProperty(editor, "pushUndoSnapshot", snapshotDescriptor);
+			restoreProperty(editor, "undo", undoDescriptor);
 		},
 	};
 }

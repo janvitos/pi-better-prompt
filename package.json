@@ -1,7 +1,7 @@
 {
   "name": "@janvitos/pi-prompt-history",
-  "version": "0.2.0",
-  "description": "Global prompt history and keyboard text selection for Pi's prompt editor.",
+  "version": "0.3.0",
+  "description": "Global prompt history and familiar keyboard editing for Pi's prompt editor.",
   "type": "module",
   "license": "MIT",
   "author": "janvitos",
@@ -13,6 +13,7 @@
     "pi-package",
     "pi-coding-agent",
     "prompt-history",
+    "prompt-editor",
     "text-selection",
     "developer-tools"
   ],

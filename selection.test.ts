@@ -21,10 +21,16 @@ class FakeEditor implements EditorComponent {
 	preferredVisualCol: unknown = null;
 	snappedFromCursorCol: unknown = null;
 	pastes = new Map<number, string>();
+	pasteCounter = 0;
 	historyIndex = -1;
 	historyDraft: unknown = null;
-	undoStack: Array<{ lines: string[]; cursorLine: number; cursorCol: number; pastes: Map<number, string> }> = [];
+	undoStack: Array<{
+		state: { lines: string[]; cursorLine: number; cursorCol: number };
+		pastes: Map<number, string>;
+		pasteCounter: number;
+	}> = [];
 	changes: string[] = [];
+	handled: string[] = [];
 	submissions: string[] = [];
 	renders = 0;
 	autocompleteCancelled = 0;
@@ -85,7 +91,9 @@ class FakeEditor implements EditorComponent {
 		if (data.length === 1 && data.charCodeAt(0) >= 32) {
 			this.pushUndoSnapshot();
 			this.insert(data);
+			return;
 		}
+		this.handled.push(data);
 	}
 	render(width: number): string[] {
 		this.lastWidth = width;
@@ -109,18 +117,19 @@ class FakeEditor implements EditorComponent {
 		return this.state.lines.map((line, logicalLine) => ({ logicalLine, startCol: 0, length: line.length }));
 	}
 	pushUndoSnapshot(): void {
-		this.undoStack.push({
-			lines: [...this.state.lines],
-			cursorLine: this.state.cursorLine,
-			cursorCol: this.state.cursorCol,
-			pastes: new Map(this.pastes),
-		});
+		this.undoStack.push(structuredClone({
+			state: this.state,
+			pastes: this.pastes,
+			pasteCounter: this.pasteCounter,
+		}));
 	}
 	undo(): void {
 		const value = this.undoStack.pop();
 		if (!value) return;
-		this.state = { lines: value.lines, cursorLine: value.cursorLine, cursorCol: value.cursorCol };
+		this.state = value.state;
 		this.pastes = value.pastes;
+		this.pasteCounter = value.pasteCounter;
+		this.onChange?.(this.getText());
 	}
 	cancelAutocomplete(): void { this.autocompleteCancelled++; }
 	exitHistoryBrowsing(): void { this.historyIndex = -1; this.historyDraft = null; }
@@ -158,7 +167,13 @@ const ACTIONS: Record<string, string> = {
 	yank: "tui.editor.yank",
 };
 
-function dependencies(copied: string[], copyError?: unknown): SelectionDependencies {
+function dependencies(
+	copied: string[],
+	options: {
+		copyText?: (text: string) => Promise<void>;
+		onCopyError?: (error: unknown) => void;
+	} = {},
+): SelectionDependencies {
 	return {
 		baseEditor: FakeEditor as unknown as EditorConstructor,
 		matchesKey: (data, key) => data === key,
@@ -166,8 +181,8 @@ function dependencies(copied: string[], copyError?: unknown): SelectionDependenc
 		decodePrintable: (data) => data.length === 1 && data.charCodeAt(0) >= 32 ? data : undefined,
 		visibleWidth: (text) => text.replace(/\x1b\[[0-9;]*m/g, "").length,
 		sliceByColumn: (text, start, width) => text.slice(start, start + width),
-		copyText: async (text) => { if (copyError) throw copyError; copied.push(text); },
-		onCopyError: () => undefined,
+		copyText: options.copyText ?? (async (text) => { copied.push(text); }),
+		onCopyError: options.onCopyError ?? (() => undefined),
 	};
 }
 
@@ -198,6 +213,8 @@ test("Shift+Arrow selects graphemes, Ctrl+C copies, typing replaces, and undo is
 	assert.equal(editor.undoStack.length, 1);
 	editor.undo();
 	assert.equal(editor.getText(), "hello😀");
+	editor.handleInput("ctrl+shift+z");
+	assert.equal(editor.getText(), "hellX");
 });
 
 test("selection deletion, directional collapse, Escape, newline, and submit follow editor conventions", () => {
@@ -266,11 +283,130 @@ test("programmatic insertion replaces a selection atomically and setText clears 
 	assert.deepEqual(copied, []);
 });
 
+test("Ctrl+A selects the full prompt and Ctrl+X cuts it as one undoable edit", async () => {
+	const copied: string[] = [];
+	const editor = new FakeEditor();
+	editor.setText("first\nsecond😀");
+	installPromptSelection(editor, dependencies(copied));
+
+	editor.handleInput("ctrl+a");
+	const rendered = editor.render(20);
+	assert.match(rendered[1]!, /\x1b\[7mfirst\x1b\[27m/);
+	assert.match(rendered[2]!, /\x1b\[7msecond😀\x1b\[27m/);
+	editor.handleInput("ctrl+x");
+	await Promise.resolve();
+	assert.deepEqual(copied, ["first\nsecond😀"]);
+	assert.equal(editor.getText(), "");
+	assert.equal(editor.undoStack.length, 1);
+
+	editor.handleInput("ctrl+z");
+	assert.equal(editor.getText(), "first\nsecond😀");
+	editor.handleInput("ctrl+shift+z");
+	assert.equal(editor.getText(), "");
+});
+
+test("Ctrl+Z and Ctrl+Shift+Z support repeated undo/redo and invalidate redo on edits", () => {
+	const editor = new FakeEditor();
+	installPromptSelection(editor, dependencies([]));
+	editor.handleInput("A");
+	editor.handleInput("B");
+	assert.equal(editor.getText(), "AB");
+
+	editor.handleInput("ctrl+z");
+	assert.equal(editor.getText(), "A");
+	editor.handleInput("ctrl+z");
+	assert.equal(editor.getText(), "");
+	const handledAfterUndo = editor.handled.length;
+	editor.handleInput("ctrl+z");
+	assert.equal(editor.getText(), "");
+	assert.equal(editor.handled.length, handledAfterUndo);
+	editor.handleInput("ctrl+shift+z");
+	assert.equal(editor.getText(), "A");
+	editor.handleInput("ctrl+shift+z");
+	assert.equal(editor.getText(), "AB");
+
+	editor.handleInput("ctrl+z");
+	editor.handleInput("X");
+	assert.equal(editor.getText(), "AX");
+	editor.handleInput("ctrl+shift+z");
+	assert.equal(editor.getText(), "AX");
+	assert.equal(editor.handled.at(-1), "ctrl+shift+z");
+});
+
+test("Ctrl+X preserves Pi fallthrough while Ctrl+Z is consumed without undo history", () => {
+	const editor = new FakeEditor();
+	editor.setText("prompt");
+	installPromptSelection(editor, dependencies([]));
+	editor.handleInput("ctrl+x");
+	assert.equal(editor.getText(), "prompt");
+	assert.equal(editor.handled.at(-1), "ctrl+x");
+
+	editor.setText("");
+	const handledBeforeUndo = editor.handled.length;
+	editor.handleInput("ctrl+z");
+	assert.equal(editor.handled.length, handledBeforeUndo);
+});
+
+test("cut preserves text on clipboard failure or stale asynchronous selection", async () => {
+	const errors: unknown[] = [];
+	const failed = new FakeEditor();
+	failed.setText("keep me");
+	installPromptSelection(failed, dependencies([], {
+		copyText: async () => { throw new Error("clipboard unavailable"); },
+		onCopyError: (error) => { errors.push(error); },
+	}));
+	failed.handleInput("ctrl+a");
+	failed.handleInput("ctrl+x");
+	await Promise.resolve();
+	await Promise.resolve();
+	assert.equal(failed.getText(), "keep me");
+	assert.equal(errors.length, 1);
+
+	let resolveCopy: (() => void) | undefined;
+	const stale = new FakeEditor();
+	stale.setText("old text");
+	installPromptSelection(stale, dependencies([], {
+		copyText: () => new Promise<void>((resolve) => { resolveCopy = resolve; }),
+	}));
+	stale.handleInput("ctrl+a");
+	stale.handleInput("ctrl+x");
+	stale.handleInput("N");
+	assert.equal(stale.getText(), "N");
+	resolveCopy?.();
+	await Promise.resolve();
+	assert.equal(stale.getText(), "N");
+});
+
+test("cut expands paste markers and undo restores their registry", async () => {
+	const copied: string[] = [];
+	const editor = new FakeEditor();
+	const marker = "[paste #1 12 chars]";
+	editor.setText(marker);
+	editor.pastes.set(1, "expanded one");
+	editor.pasteCounter = 1;
+	installPromptSelection(editor, dependencies(copied));
+	editor.handleInput("ctrl+a");
+	editor.handleInput("ctrl+x");
+	await Promise.resolve();
+	assert.deepEqual(copied, ["expanded one"]);
+	assert.equal(editor.getText(), "");
+	assert.equal(editor.pastes.size, 0);
+
+	editor.handleInput("ctrl+z");
+	assert.equal(editor.getText(), marker);
+	assert.equal(editor.pastes.get(1), "expanded one");
+	assert.equal(editor.pasteCounter, 1);
+	editor.handleInput("ctrl+shift+z");
+	assert.equal(editor.getText(), "");
+	assert.equal(editor.pastes.size, 0);
+});
+
 test("render hook highlights registered editors and is reference-counted on dispose", () => {
 	const first = new FakeEditor();
 	const second = new FakeEditor();
 	first.setText("first");
 	second.setText("second");
+	const firstUndo = first.undo;
 	const firstInstalled = installPromptSelection(first, dependencies([]));
 	const secondInstalled = installPromptSelection(second, dependencies([]));
 	first.handleInput("shift+home");
@@ -280,6 +416,7 @@ test("render hook highlights registered editors and is reference-counted on disp
 
 	firstInstalled.dispose();
 	assert.equal(first.render(10)[1], "first");
+	assert.equal(first.undo, firstUndo);
 	assert.match(second.render(10)[1]!, /\x1b\[7msecond\x1b\[27m/);
 	secondInstalled.dispose();
 	secondInstalled.dispose();
