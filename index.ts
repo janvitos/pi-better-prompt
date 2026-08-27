@@ -21,6 +21,7 @@ import { installGlobalHistory, type GlobalHistoryEditor } from "./editor.ts";
 import { HistoryStore } from "./history.ts";
 import { decorateCurrentFactory } from "./lifecycle.ts";
 import { installPromptMouse, setActiveMouseEditor, type PromptMouseInstallation } from "./mouse.ts";
+import { installPromptSubmitScroll, type PromptSubmitScrollInstallation } from "./scroll.ts";
 
 export const GLOBAL_HISTORY_PATH = path.join(getAgentDir(), "prompt-history.jsonl");
 
@@ -29,6 +30,7 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 	const store = new HistoryStore(GLOBAL_HISTORY_PATH);
 	let activeEditor: GlobalHistoryEditor | undefined;
 	let mouseInstallation: PromptMouseInstallation | undefined;
+	let submitScrollInstallation: PromptSubmitScrollInstallation | undefined;
 	let currentContext: ExtensionContext | undefined;
 	let prompts: string[] = [];
 
@@ -72,6 +74,8 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 			previous,
 			fallback,
 			(editor, tui, _theme, keybindings): EditorComponent => {
+				submitScrollInstallation?.dispose();
+				submitScrollInstallation = undefined;
 				activeEditor?.dispose();
 				const installed = installGlobalHistory(editor, prompts, {
 					baseEditor: Editor,
@@ -94,6 +98,7 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 					},
 				});
 				activeEditor = installed;
+				submitScrollInstallation = installPromptSubmitScroll(installed.editor, tui);
 				setActiveMouseEditor({
 					component: installed.editor,
 					clearSelection: () => installed.clearSelection(),
@@ -119,6 +124,8 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 		setActiveMouseEditor(undefined);
 		mouseInstallation?.dispose();
 		mouseInstallation = undefined;
+		submitScrollInstallation?.dispose();
+		submitScrollInstallation = undefined;
 		activeEditor?.dispose();
 		activeEditor = undefined;
 		currentContext = undefined;

@@ -2,7 +2,7 @@
 
 OpenCode-style global prompt history, familiar keyboard text editing, and simple activity statuses for the [Pi coding agent](https://github.com/earendil-works/pi).
 
-Pi normally reconstructs Up/Down history from the active session. This extension instead keeps one text history shared across sessions and projects, so `/new` no longer leaves prompt navigation empty. It also adds selection, clipboard, undo, and redo shortcuts to Pi's main prompt editor and replaces the generic working message with the agent's current activity.
+Pi normally reconstructs Up/Down history from the active session. This extension instead keeps one text history shared across sessions and projects, so `/new` no longer leaves prompt navigation empty. It also adds selection, clipboard, undo, and redo shortcuts to Pi's main prompt editor, keeps submitted prompts visible in fullscreen mode, and replaces the generic working message with the agent's current activity.
 
 ## Policy
 
@@ -38,6 +38,8 @@ Typing, pasting, inserting a newline, yanking, Backspace/Delete, and Pi's word/l
 Selection is grapheme-aware and supports Unicode, multiline prompts, and visual wrapping. Large collapsed-paste markers remain atomic; copying one copies its expanded contents.
 
 Terminal support for modified navigation sequences varies. Modern terminals with the Kitty keyboard protocol work best; Pi also recognizes common legacy Shift+Arrow sequences.
+
+When the prompt is submitted while the fullscreen transcript is scrolled up, the extension automatically returns the transcript to the bottom before Pi handles the submission. It observes actual editor submissions, so Enter combinations that insert a newline do not change transcript position. Regular terminal mode retains the terminal's native scrolling behavior.
 
 Click-to-caret works only in Pi's fullscreen TUI. It supports Pi's active built-in or custom editor, including wrapped, scrolled, padded, multiline, and Unicode prompt text. Other clicks retain Pi's transcript selection, hyperlink, and scrollbar behavior. Because Pi does not expose component mouse events to extensions, this feature uses guarded fullscreen renderer internals adapted from [pi-starline](https://github.com/Andy8647/pi-starline); incompatible Pi versions safely leave it disabled.
 
@@ -152,7 +154,7 @@ npm test
 npm pack --dry-run
 ```
 
-Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, custom editor preservation, activity transitions and parallel tools, selection ranges, fullscreen click positioning, Unicode, cut/copy safety, undo/redo, paste markers, rendering, and cleanup.
+Tests cover corruption recovery, normalization, retention, duplicate handling, concurrent writers, stale locks, editor seeding, session-history suppression, custom editor preservation, activity transitions and parallel tools, selection ranges, fullscreen submit scrolling and click positioning, Unicode, cut/copy safety, undo/redo, paste markers, rendering, and cleanup.
 
 ## License
 

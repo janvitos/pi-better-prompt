@@ -1,6 +1,6 @@
 {
   "name": "@janvitos/pi-better-prompt",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Global prompt history, familiar keyboard editing, and simple activity statuses for Pi.",
   "type": "module",
   "license": "MIT",
@@ -28,6 +28,7 @@
     "editor.ts",
     "selection.ts",
     "mouse.ts",
+    "scroll.ts",
     "activity.ts",
     "lifecycle.ts",
     "THIRD_PARTY_NOTICES.md"
