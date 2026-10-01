@@ -11,6 +11,7 @@ Pi normally reconstructs Up/Down history from the active session. This extension
 - Trims surrounding whitespace and ignores empty prompts.
 - Suppresses identical consecutive entries; the same prompt can appear again after a different entry.
 - Persists interactive prompts before skill or prompt-template expansion.
+- Persists submitted slash commands before Pi dispatches them, including built-in commands that bypass Pi's `input` event.
 - Persists `!` and `!!` user shell commands.
 - Uses oldest-to-newest seeding so Up retrieves the newest entry first.
 - Skips malformed JSONL records and rewrites valid retained records on load.
@@ -139,9 +140,9 @@ This extension follows OpenCode TUI's global-storage model, but intentionally ad
 | Attachments | Restored | Not stored |
 | Cleared drafts | Some are retained | Not retained |
 | Shell input | Mode and parts retained | Canonical `!`/`!!` text |
-| Slash commands | Retained | Built-in and extension commands are not retained |
+| Slash commands | Retained | Submitted slash commands are retained as text |
 
-Pi handles slash commands before its extension `input` event and does not expose a general submitted-command event. Images are also omitted because Pi's public editor-history API accepts text only.
+Pi handles built-in slash commands before its extension `input` event. This extension records submitted slash commands at the TUI editor boundary before dispatch; extension slash commands also pass through the normal input path and are deduplicated. Images are omitted because Pi's public editor-history API accepts text only.
 
 ## Non-TUI modes
 
