@@ -36,9 +36,11 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 
 	async function record(input: string): Promise<void> {
 		if (currentContext?.mode !== "tui") return;
-		activeEditor?.addInteractive(input);
+		const normalized = input.trim();
+		if (!normalized) return;
+		if (prompts.at(-1) !== normalized) activeEditor?.addInteractive(normalized);
 		try {
-			await store.append(input);
+			prompts = await store.append(normalized);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			currentContext?.ui.notify(`Could not persist global prompt history: ${message}`, "warning");
@@ -96,7 +98,7 @@ export default function betterPrompt(pi: ExtensionAPI): void {
 						const message = error instanceof Error ? error.message : String(error);
 						ctx.ui.notify(`Could not copy prompt selection: ${message}`, "warning");
 					},
-				});
+				}, record);
 				activeEditor = installed;
 				submitScrollInstallation = installPromptSubmitScroll(installed.editor, tui);
 				setActiveMouseEditor({
